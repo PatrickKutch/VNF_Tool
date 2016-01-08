@@ -85,7 +85,7 @@ unsigned long sndCounter;
 
 
 // Information for command line goodis
-const char *argp_program_version = "V0.1.0a";
+const char *argp_program_version = "V0.1.0b";
 const char *argp_program_bug_address = "<http://github.com/PatrickKutch/VNF_Tool>";
 static char doc[] = "VNF Tool";
 static char args_doc[] = "[FILENAME]...";
@@ -474,7 +474,7 @@ void * BlastPCAPPackets(void *pArgs)
     int loopCount = 0;
     char repeatString[200];
     int processedThisLoopCount = 0;
-    unsigned char *buffer = (unsigned char *)malloc(65536); //Its Big!
+    unsigned char *buffer;
     int newLength;
 
     args = (const struct threadArgs*)pArgs;
@@ -491,6 +491,7 @@ void * BlastPCAPPackets(void *pArgs)
     }
 
     const struct packetNode *pCurrent;
+    buffer = NULL;
    
     while (loopCount < loopCountMax)
     {
@@ -500,7 +501,12 @@ void * BlastPCAPPackets(void *pArgs)
         while (pCurrent != NULL) // go throught the linked list and do the deed!
         {
             IncrementSndCount();
-            memcpy(buffer, pCurrent->data, pCurrent->length); // copy into temp buffer for manipulation
+            if (buffer != NULL)
+            {
+                free(buffer);
+            }
+            buffer = (unsigned char *)malloc(pCurrent->length); //Its Big!
+            memcpy(buffer, pCurrent->data, pCurrent->length); // copy into temp buffer for manipulation, probably quite slow
 
             if (arguments.VerboseLevel > 1 && SendOutput)
             {
@@ -517,8 +523,11 @@ void * BlastPCAPPackets(void *pArgs)
                 printf("Packets Processed: %u      \r", getSndCount());
             }
             ManipulatePacket(&buffer, pCurrent->length, &newLength);
+            if (arguments.VerboseLevel > 1  && SendOutput)
+            {
+                PrintData(buffer, newLength);
+            }
             write(outSock, buffer, newLength); 
-            PrintData(buffer, newLength);
             if (arguments.MaxCount > 0)
             {
                 if (++processedThisLoopCount >= arguments.MaxCount)
@@ -708,7 +717,7 @@ int BindToInterface(char *device)
 */
 void InsertData(unsigned char **pBuffer,  int data_size, const unsigned char *newData,  int new_data_size,  int location, int *newLength)
 {
-    unsigned char *newBuffer = (unsigned char *)malloc(data_size+new_data_size);
+    unsigned char *newBuffer = (unsigned char *)malloc(650000);
     unsigned char *buffer = *pBuffer;   
     unsigned char *ptrBuf = newBuffer;
 

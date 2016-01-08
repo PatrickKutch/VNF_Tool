@@ -1,5 +1,6 @@
 # VNF_Tool
 This is just a simple tool I wrote to do some testing for some NFV/VNF work I'm doing.
+I like the ability to read from a PCAP file and send data.  Gives me a repeatable set of data to test with.
 
 It basically takes data from a source (either an ethernet device, or a PCAP file) does any optional
 manipulation (SRC/DEST MAC, VLAN TAG, RAW data) and blasts it out to another device if specified.

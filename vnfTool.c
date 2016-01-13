@@ -255,6 +255,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
         if (0 == strncmp(arg, "random", 6))
         {
             arguments->RandomPriority = true;
+            srand(time(NULL));  // set random seed, so not always the same
         }
         else
         {

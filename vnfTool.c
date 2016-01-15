@@ -85,7 +85,7 @@ unsigned long sndCounter;
 
 
 // Information for command line goodis
-const char *argp_program_version = "V0.1.0b";
+const char *argp_program_version = "V0.1.0c";
 const char *argp_program_bug_address = "<http://github.com/PatrickKutch/VNF_Tool>";
 static char doc[] = "VNF Tool";
 static char args_doc[] = "[FILENAME]...";
@@ -100,7 +100,7 @@ static struct argp_option options[] = {
     { "priority", 'p', "TAG", 0, "Priority Tag (1-7 | 'random').", 1 },
     { "source", 's', "SOURCE MAC", 0, "Change Source MAC address (aa:bb:cc:dd:ee:ff)." },
     { "dest", 'd', "DEST MAC", 0, "Change Dest MAC address (aa:bb:cc:dd:ee:ff)." },
-    { "gap", 'g', "", 0, "Sleep time between packets when reading from PCAP file in uSeconds, default is 50." },
+    { "gap", 'g', "", 0, "Sleep time between packets when reading from PCAP file in uSeconds, default is 0." },
     { "threadcount",'c',"THREAD COUNT", 0, "Number of simultaneous threads to run." },
     { "verbose", 'v', "", 0, "verbose level 0 - 3." },
     { 0 }
@@ -355,6 +355,7 @@ int Process_DevToDev(int inpSock, int outSock)
     {
         //data_size = read(inpSock, buffer, 65536);
         data_size = recvfrom(inpSock,buffer,65536,0,(struct sockaddr*)&saddr, &saddr_size );
+        
         if (data_size < 0)
         {
             printf("Recvfrom error , failed to get packets\n");
@@ -365,6 +366,7 @@ int Process_DevToDev(int inpSock, int outSock)
             continue;
         }
         IncrementRcvCount();
+        
         if (arguments.VerboseLevel > 1)
         {
             printf("\nIncoming[%d]\n", packet_num);
@@ -373,6 +375,7 @@ int Process_DevToDev(int inpSock, int outSock)
         else if (arguments.VerboseLevel == 1)
         {
             printf("Packets Processed: %d      \r", packet_num);
+            fflush(stdout); // otherwise might not print
         }
         if (outSock != 0)
         {

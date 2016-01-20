@@ -44,6 +44,7 @@ struct packetNode // linked list for holding packets read from PCAP file
 {
     unsigned char *data;
     unsigned int length;
+    unsigned int PacketNumber;
     struct packetNode *pNext;
 };
 
@@ -54,6 +55,17 @@ struct threadArgs  // goodies for the worker threads
     bool SendOutput; 
     int outSock;
 };
+
+struct sendThreadArgs // For Send Thread
+{
+    unsigned char *pRawPacket;
+    int packetLength;
+    int maxLoopCount;
+    int outSock;
+    int packetNumber;
+};
+
+
 // function declarations
 void ProcessPacket(unsigned char *, int);
 void PrintData(unsigned char *, int);
@@ -76,16 +88,25 @@ void IncrementRcvCount();
 void IncrementSndCount();
 unsigned long getRcvCount();
 unsigned long getSndCount();
+void * ThreadedManipulateAndSend(void *pArgs);
+
+struct packetNode * GetPacketFromSendQueue();
+void AddPacketToSendQueue(const char *pBuffer,int buffLen, unsigned int);
+
 
 int sock_input,sock_output;
 pthread_mutex_t rcvCounterLock;
 pthread_mutex_t sndCounterLock;
+
+pthread_mutex_t sendListLock;
 unsigned long rcvCounter;
 unsigned long sndCounter;
+struct packetNode *pSendList,*pEndList;
+
 
 
 // Information for command line goodis
-const char *argp_program_version = "V0.1.0c";
+const char *argp_program_version = "V0.1.1";
 const char *argp_program_bug_address = "<http://github.com/PatrickKutch/VNF_Tool>";
 static char doc[] = "VNF Tool";
 static char args_doc[] = "[FILENAME]...";
@@ -101,7 +122,7 @@ static struct argp_option options[] = {
     { "source", 's', "SOURCE MAC", 0, "Change Source MAC address (aa:bb:cc:dd:ee:ff)." },
     { "dest", 'd', "DEST MAC", 0, "Change Dest MAC address (aa:bb:cc:dd:ee:ff)." },
     { "gap", 'g', "", 0, "Sleep time between packets when reading from PCAP file in uSeconds, default is 0." },
-    { "threadcount",'c',"THREAD COUNT", 0, "Number of simultaneous threads to run." },
+    { "threadcount",'c',"THREAD COUNT", 0, "Number of simultaneous threads to run. " }, // Warning, specifying > 1 when receiving and sending, will send out of order
     { "verbose", 'v', "", 0, "verbose level 0 - 3." },
     { 0 }
 };
@@ -284,6 +305,9 @@ int main(int argc, char *argv[])
 {
     int retVal = 1;
 
+    pSendList = NULL;
+    pEndList = NULL;
+
     InitializeArguments();
     argp_parse(&argp, argc, argv, 0, 0, &arguments);
 
@@ -341,6 +365,7 @@ int Process_DevToDev(int inpSock, int outSock)
     socklen_t saddr_size = sizeof(saddr);
     int loopCountMax = arguments.RepeatCount;
     int loopCount;
+    pthread_t th[arguments.ThreadCount];
 
     if (loopCountMax < 1)
     {
@@ -349,6 +374,25 @@ int Process_DevToDev(int inpSock, int outSock)
     else
     {
         printf("Repeating each received packet %d times\n", arguments.RepeatCount);
+    }
+    if (outSock != 0)
+    {
+        if (arguments.VerboseLevel > 0)
+        {
+            printf("Creating %d threads for Tx.\n",arguments.ThreadCount);
+        }
+        for (loopCount = 0; loopCount < arguments.ThreadCount; loopCount++) 
+        {
+            int err = pthread_create(&th[loopCount],NULL,ThreadedManipulateAndSend,(void *)&outSock);
+            if (err != 0)
+            {
+                printf("\nCan't Create Thread :[%s]\n",strerror(err));
+            }
+            else
+            {
+                pthread_detach(th[loopCount-1]);
+            }
+        }
     }
 
     while (1)
@@ -367,38 +411,22 @@ int Process_DevToDev(int inpSock, int outSock)
         }
         IncrementRcvCount();
         
-        if (arguments.VerboseLevel > 1)
+        if (outSock == 0)
         {
-            printf("\nIncoming[%d]\n", packet_num);
-            PrintData(buffer, data_size);
-        }
-        else if (arguments.VerboseLevel == 1)
-        {
-            printf("Packets Processed: %d      \r", packet_num);
-            fflush(stdout); // otherwise might not print
+            if (arguments.VerboseLevel > 1)
+            {
+                printf("\nIncoming[%d]\n", packet_num);
+                PrintData(buffer, data_size);
+            }
+            else if (arguments.VerboseLevel == 1)
+            {
+                printf("Packets Processed: %d      \r", packet_num);
+                fflush(stdout); // otherwise might not print
+            }
         }
         if (outSock != 0)
         {
-            loopCount = 0;
-            while (loopCount < loopCountMax)
-            {
-                ManipulatePacket(&buffer, data_size, &data_size);
-                write(outSock, buffer, data_size);
-                if (arguments.VerboseLevel > 1)
-                {
-                    if (loopCountMax == 1)
-                    {
-                        printf("\nOutgoing[%d]\n", packet_num); 
-                    }
-                    else
-                    {
-                        printf("\nOutgoing[%d: Repeat#:%d]\n", packet_num,loopCount+1); 
-                    }
-                    PrintData(buffer, data_size);
-                }
-                loopCount++;
-                IncrementSndCount();
-            }
+            AddPacketToSendQueue(buffer, data_size,packet_num);
         }
         packet_num++;
     }
@@ -421,6 +449,7 @@ void Process_PcapFileToDev_PreProcessed(const char *fName, int outSock)
     unsigned char *buffer = (unsigned char *)malloc(65536); //Its Big!
     packetCount = ReadPCPFile(fName);
     pthread_t th[arguments.ThreadCount];
+
     if (packetCount == 0)
     {
         return;
@@ -459,7 +488,16 @@ void Process_PcapFileToDev_PreProcessed(const char *fName, int outSock)
 
     for (loopCount = 1; loopCount < arguments.ThreadCount; loopCount++)
     {
-        pthread_create(&th[loopCount-1],NULL,BlastPCAPPackets,&(struct threadArgs){pList, packetCount, false, outSock});
+        int err = pthread_create(&th[loopCount-1],NULL,BlastPCAPPackets,&(struct threadArgs){pList, packetCount, false, outSock});
+        if (err != 0)
+        {
+            printf("\nCan't Create Thread :[%s]\n",strerror(err));
+        }
+        else
+        {
+            pthread_detach(th[loopCount-1]);
+        }
+
     }
     
     BlastPCAPPackets(&(struct threadArgs){pList, packetCount, true, outSock});
@@ -505,12 +543,8 @@ void * BlastPCAPPackets(void *pArgs)
         while (pCurrent != NULL) // go throught the linked list and do the deed!
         {
             IncrementSndCount();
-            if (buffer != NULL)
-            {
-                free(buffer);
-            }
             buffer = (unsigned char *)malloc(pCurrent->length); //Its Big!
-            memcpy(buffer, pCurrent->data, pCurrent->length); // copy into temp buffer for manipulation, probably quite slow
+            memmove(buffer, pCurrent->data, pCurrent->length); // copy into temp buffer for manipulation, probably quite slow
 
             if (arguments.VerboseLevel > 1 && SendOutput)
             {
@@ -541,6 +575,7 @@ void * BlastPCAPPackets(void *pArgs)
             }
             usleep(arguments.sleepTime); // may want a rest in between
             pCurrent = pCurrent->pNext;
+            free(buffer);
         }
         loopCount++;
 
@@ -721,7 +756,7 @@ int BindToInterface(char *device)
 */
 void InsertData(unsigned char **pBuffer,  int data_size, const unsigned char *newData,  int new_data_size,  int location, int *newLength)
 {
-    unsigned char *newBuffer = (unsigned char *)malloc(650000);
+    unsigned char *newBuffer = (unsigned char *)malloc(650000); // Todo: only malloc what I need
     unsigned char *buffer = *pBuffer;   
     unsigned char *ptrBuf = newBuffer;
 
@@ -1047,4 +1082,156 @@ unsigned long getSndCount()
 
     return retVal;
 }
+
+/*
+    To be a bit more performant when reading from one device and writing out,
+    incoming data is placed into a mutexed linked list, and thread(s) are created
+    to manipulate and blast the data out.  This is the thread proc to read then
+    linked list and blast the data out.
+*/
+void * ThreadedManipulateAndSend(void *pArgs)
+{
+    int outSock = *(int *) pArgs;
+    unsigned char *pBuffer;
+    int loopCountMax = arguments.RepeatCount;
+    int loopCount;
+    struct packetNode *pPacket = NULL;
+    
+    bool NeedToDupData;
+
+
+    if (loopCountMax < 1)
+    {
+        loopCountMax = 1;
+    }
+
+    NeedToDupData = arguments.ManipulateData;
+
+    while (1)
+    {
+        int loopCount = 0; 
+        pPacket = NULL;
+        pPacket = GetPacketFromSendQueue();
+        if (NULL != pPacket)
+        {
+            int data_size = pPacket->length;
+
+          //  printf("%d \n", pPacket->PacketNumber);
+            if (arguments.VerboseLevel > 1)
+            {
+                printf("\nIncoming[%d]\n", pPacket->PacketNumber);
+                PrintData(pPacket->data, data_size);
+            }
+            else if (arguments.VerboseLevel == 1)
+            {
+                printf("Packets Processed: %d      \r", pPacket->PacketNumber);
+                fflush(stdout); // otherwise might not print
+            }
+
+            
+            while (loopCount < loopCountMax)
+            {
+                pBuffer = NULL;
+                pBuffer = malloc(data_size); 
+                
+                if (NULL == pBuffer)
+                {
+                    printf("NULL BUFFER!!!!!\n");
+                    exit(1);
+                }
+
+                if (NeedToDupData)
+                {
+                     memcpy(pBuffer, pPacket->data,data_size); 
+                     ManipulatePacket(&pBuffer, data_size, &data_size);
+                }
+                else
+                {
+                    pBuffer = pPacket->data; // if not repeating, no need to copy data before manipulating
+                }
+                
+                write(outSock, pBuffer, data_size);
+
+                
+                if (arguments.VerboseLevel > 1)
+                {
+                    if (loopCountMax == 1)
+                    {
+                        printf("\nOutgoing[%d]\n", pPacket->PacketNumber); 
+                    } 
+                    else
+                    {
+                        printf("\nOutgoing[%d: Repeat#:%d]\n", pPacket->PacketNumber,loopCount+1); 
+                    }
+                    
+                    PrintData(pBuffer, data_size);
+                }
+                 
+                loopCount++;
+                IncrementSndCount();
+                if (NeedToDupData)
+                {
+                    free(pBuffer);
+                }
+                pBuffer = NULL;
+
+            } 
+            
+            pBuffer = NULL;
+            free((void *) pPacket->data);
+            free(pPacket);
+        }
+        else
+        {
+            pthread_yield(); // no data to process, so just yield
+        }
+    }
+}
+/**/
+void AddPacketToSendQueue(const char *pBuffer,int buffLen, unsigned int PacketNumber)
+{
+    struct packetNode *pNode = malloc(sizeof(struct packetNode));
+    pNode->data = malloc(buffLen);
+    pNode->length = buffLen;
+    pNode->PacketNumber = PacketNumber;
+    pNode->pNext = NULL;
+
+    pthread_mutex_lock(&sendListLock);
+        if (NULL == pSendList)
+        {
+            pSendList = pNode;
+            pEndList = pNode;
+        }
+        else
+        {
+            pEndList->pNext = pNode;
+            pEndList = pNode;
+        }
+    pthread_mutex_unlock(&sendListLock);
+}
+
+struct packetNode * GetPacketFromSendQueue()
+{
+    struct packetNode *pNode = NULL;
+
+    pthread_mutex_lock(&sendListLock);
+        if (NULL != pSendList)
+        {
+            pNode = pSendList;
+            pSendList = pNode->pNext;
+            if (NULL == pSendList)
+            {
+                pEndList = NULL;
+            }
+        }
+    pthread_mutex_unlock(&sendListLock);
+
+    if (NULL != pNode) 
+    {
+        pNode->pNext = NULL; // so we can't manipulate outside of here. No need to do this within the Mutex
+    }
+    
+    return pNode;
+}
+    
 

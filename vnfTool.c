@@ -107,7 +107,7 @@ struct packetNode *pSendList,*pEndList;
 
 
 // Information for command line goodis
-const char *argp_program_version = "V0.1.1b";
+const char *argp_program_version = "V0.1.1c";
 const char *argp_program_bug_address = "<http://github.com/PatrickKutch/VNF_Tool>";
 static char doc[] = "VNF Tool";
 static char args_doc[] = "[FILENAME]...";
@@ -1180,8 +1180,7 @@ void * ThreadedManipulateAndSend(void *pArgs)
         }
         else
         {
-            pthread_yield(); // no data to process, so just yield
-            sleep(.001);
+            usleep(1000); // no data to process, so just chill for a tiny bit
         }
     }
 }

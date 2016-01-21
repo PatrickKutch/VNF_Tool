@@ -107,7 +107,7 @@ struct packetNode *pSendList,*pEndList;
 
 
 // Information for command line goodis
-const char *argp_program_version = "V0.1.1a";
+const char *argp_program_version = "V0.1.1b";
 const char *argp_program_bug_address = "<http://github.com/PatrickKutch/VNF_Tool>";
 static char doc[] = "VNF Tool";
 static char args_doc[] = "[FILENAME]...";
@@ -545,8 +545,8 @@ void * BlastPCAPPackets(void *pArgs)
         while (pCurrent != NULL) // go throught the linked list and do the deed!
         {
             IncrementSndCount();
-            buffer = (unsigned char *)malloc(pCurrent->length); //Its Big!
-            memmove(buffer, pCurrent->data, pCurrent->length); // copy into temp buffer for manipulation, probably quite slow
+            buffer = (unsigned char *)malloc(pCurrent->length);
+            memcpy(buffer, pCurrent->data, pCurrent->length); // copy into temp buffer for manipulation, probably quite slow
 
             if (arguments.VerboseLevel > 1 && SendOutput)
             {
@@ -758,7 +758,7 @@ int BindToInterface(char *device)
 */
 void InsertData(unsigned char **pBuffer,  int data_size, const unsigned char *newData,  int new_data_size,  int location, int *newLength)
 {
-    unsigned char *newBuffer = (unsigned char *)malloc(650000); // Todo: only malloc what I need
+    unsigned char *newBuffer = (unsigned char *)malloc(data_size + new_data_size); 
     unsigned char *buffer = *pBuffer;   
     unsigned char *ptrBuf = newBuffer;
 
@@ -958,7 +958,7 @@ bool CheckArguments()
        arguments.ManipulateData = true; 
        int size = strlen(arguments.rawData)/2;
        arguments.rawLength = size;
-       char *l2Data = (char *)malloc(size + 1); 
+       char *l2Data = (char *)malloc(size ); 
        char data[3];
        int iLoop;
        
@@ -1134,16 +1134,11 @@ void * ThreadedManipulateAndSend(void *pArgs)
             while (loopCount < loopCountMax)
             {
                 pBuffer = NULL;
-                pBuffer = malloc(data_size); 
                 
-                if (NULL == pBuffer)
-                {
-                    printf("NULL BUFFER!!!!!\n");
-                    exit(1);
-                }
 
                 if (NeedToDupData)
                 {
+                     pBuffer = malloc(data_size); 
                      memcpy(pBuffer, pPacket->data,data_size); 
                      ManipulatePacket(&pBuffer, data_size, &data_size);
                 }
@@ -1186,6 +1181,7 @@ void * ThreadedManipulateAndSend(void *pArgs)
         else
         {
             pthread_yield(); // no data to process, so just yield
+            sleep(.001);
         }
     }
 }

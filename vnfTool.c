@@ -101,12 +101,13 @@ pthread_mutex_t sndCounterLock;
 pthread_mutex_t sendListLock;
 unsigned long rcvCounter;
 unsigned long sndCounter;
+int sendQueueSize;
 struct packetNode *pSendList,*pEndList;
 
 
 
 // Information for command line goodis
-const char *argp_program_version = "V0.1.1";
+const char *argp_program_version = "V0.1.1a";
 const char *argp_program_bug_address = "<http://github.com/PatrickKutch/VNF_Tool>";
 static char doc[] = "VNF Tool";
 static char args_doc[] = "[FILENAME]...";
@@ -307,6 +308,7 @@ int main(int argc, char *argv[])
 
     pSendList = NULL;
     pEndList = NULL;
+    sendQueueSize = 0;
 
     InitializeArguments();
     argp_parse(&argp, argc, argv, 0, 0, &arguments);
@@ -1190,8 +1192,18 @@ void * ThreadedManipulateAndSend(void *pArgs)
 /**/
 void AddPacketToSendQueue(const char *pBuffer,int buffLen, unsigned int PacketNumber)
 {
+    bool process;
+    pthread_mutex_lock(&sendListLock);
+        process = sendQueueSize < 5000;  // the app can't keep up with gigs of traffic, so if queue gets too large, just drop the packets :-(
+    pthread_mutex_unlock(&sendListLock);
+
+    if (!process)
+    {
+        return;
+    }
     struct packetNode *pNode = malloc(sizeof(struct packetNode));
     pNode->data = malloc(buffLen);
+    memcpy(pNode->data,pBuffer,buffLen);
     pNode->length = buffLen;
     pNode->PacketNumber = PacketNumber;
     pNode->pNext = NULL;
@@ -1207,6 +1219,7 @@ void AddPacketToSendQueue(const char *pBuffer,int buffLen, unsigned int PacketNu
             pEndList->pNext = pNode;
             pEndList = pNode;
         }
+        sendQueueSize++;
     pthread_mutex_unlock(&sendListLock);
 }
 
@@ -1223,6 +1236,7 @@ struct packetNode * GetPacketFromSendQueue()
             {
                 pEndList = NULL;
             }
+            sendQueueSize--;
         }
     pthread_mutex_unlock(&sendListLock);
 

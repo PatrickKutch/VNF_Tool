@@ -29,7 +29,7 @@ OBJ=$(COMMON_OBJ) $(CFG_OBJ)
 ALL_OBJ=$(OUTDIR)/vnfTool.o 
 
 COMPILE=gcc -c -D_REENTRANT -g -o "$(OUTDIR)/$(*F).o" $(CFG_INC) $<
-LINK=gcc  -g -L/usr/local/lib -Bstatic -lpcap -Bdynamic -pthread -o "$(OUTFILE)" $(ALL_OBJ)
+LINK=gcc  -g -L/usr/local/lib -Bstatic -Bdynamic -pthread -o "$(OUTFILE)" $(ALL_OBJ) -lpcap
 
 # Pattern rules
 $(OUTDIR)/%.o : %.c
@@ -70,7 +70,7 @@ OBJ=$(COMMON_OBJ) $(CFG_OBJ)
 ALL_OBJ=$(OUTDIR)/vnfTool.o 
 
 COMPILE=gcc -c  -o "$(OUTDIR)/$(*F).o" $(CFG_INC) $<
-LINK=gcc  -L/usr/local/lib -Bstatic -lpcap -Bdynamic -pthread -o "$(OUTFILE)" $(ALL_OBJ)
+LINK=gcc  -L/usr/local/lib -Bstatic -Bdynamic -pthread -o "$(OUTFILE)" $(ALL_OBJ) -lpcap
 
 # Pattern rules
 $(OUTDIR)/%.o : %.c

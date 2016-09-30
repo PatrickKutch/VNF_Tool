@@ -107,7 +107,7 @@ struct packetNode *pSendList,*pEndList;
 
 
 // Information for command line goodis
-const char *argp_program_version = "V0.1.1c";
+const char *argp_program_version = "V0.1.1d";
 const char *argp_program_bug_address = "<http://github.com/PatrickKutch/VNF_Tool>";
 static char doc[] = "VNF Tool";
 static char args_doc[] = "[FILENAME]...";
@@ -396,7 +396,7 @@ int Process_DevToDev(int inpSock, int outSock)
             }
         }
     }
-
+    usleep(100);
     while (1)
     {
         //data_size = read(inpSock, buffer, 65536);
